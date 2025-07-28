@@ -1,0 +1,4 @@
+image:
+  repository: flask-app-example-build
+  pullPolicy: IfNotPresent
+  tag: "v1.1.0"
