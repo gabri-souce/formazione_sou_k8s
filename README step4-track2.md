@@ -1,5 +1,4 @@
--Avvio vm con ensible, con conteiner con jenkins,installo kind in locale,configura config.yaml per permessi,porte e ip,lo copio sul config della vm per poter vedere il mio cluster da vm,creo pipeline che da git effettui helm install su namespace creato ul cluster
--conntrollare presenza di kubectl,helm in ambienti,sto attento a dome metto config (sua per vm che kube)
+Esecuzione Track due dove è stata creata un vm (vagrant) con ansible, e jenkins che gira in un conteiner (dove ho inserito kubectl,docker,helm), nella pipeline è stata configurato il buil, il push dell imagine del proprio Docker Hub con impostazione e selezione TAG con la configurazione di Helm.Successivamente  è stato installato un cluster (kind) e automatizzata la creazione di un namespace che effettui "helm install su namespace creato". Successivamente è stato creato su kind un serviceaccount che esegua un export del Deployment dell'applicazione Flask installata e che ritorni erroe se non presenti nel Deployment i seguenti attributi: Readiness e Liveness Probles, Limits e Requests inoltre è stato generato un token che ho utilizzato per stabilire l affidabilita tra la mia vm con connteiner è il claster(inserito in file config conteiner), inoltre è stato configurato un ingress controll in modo che chiamando via HTTP http://formazionesou.local si ottenga "hello world".
 
 pipeline {
   agent any
