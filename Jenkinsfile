@@ -2,13 +2,13 @@ pipeline {
   agent any
 
   environment {
-    registry = 'gabrisource/step4'        // Docker Hub repository
-    registryCredential = 'docker'                  // Jenkins credentials ID
+    registry = 'gabrisource/step4'          // Docker Hub repository
+    registryCredential = 'docker'           // Jenkins credentials ID
     dockerTag = ''
-    KUBECONFIG = '/home/jenkins/.kube/config'        // Percorso kubeconfig nel container Jenkins
-    NAMESPACE = 'formazione-sou'                   // Namespace Kubernetes
-    RELEASE_NAME = 'formazione-sou-release'        // Nome release Helm
-    CHART_PATH = 'charts/hello-node'               // Path della chart Helm nel repo
+    KUBECONFIG = "${env.WORKSPACE}/kubeconfig"  // kubeconfig generato dinamicamente
+    NAMESPACE = 'formazione-sou'           // Namespace Kubernetes
+    RELEASE_NAME = 'formazione-sou-release' // Nome release Helm
+    CHART_PATH = 'charts/hello-node'       // Path della chart Helm nel repo
   }
 
   stages {
@@ -54,6 +54,38 @@ pipeline {
           docker.withRegistry('https://registry.hub.docker.com', registryCredential) {
             dockerImage.push()
           }
+        }
+      }
+    }
+
+    stage('Setup Kubeconfig') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'kube-token', variable: 'KUBE_TOKEN'),
+          string(credentialsId: 'kube-ca', variable: 'KUBE_CA'),
+          string(credentialsId: 'kube-server', variable: 'KUBE_SERVER')
+        ]) {
+          sh '''
+            echo $KUBE_CA | base64 -d > ca.crt
+
+            kubectl config set-cluster mycluster \
+              --server=$KUBE_SERVER \
+              --certificate-authority=ca.crt \
+              --embed-certs=true \
+              --kubeconfig=$KUBECONFIG
+
+            kubectl config set-credentials jenkins \
+              --token=$KUBE_TOKEN \
+              --kubeconfig=$KUBECONFIG
+
+            kubectl config set-context jenkins@mycluster \
+              --cluster=mycluster \
+              --user=jenkins \
+              --namespace=${NAMESPACE} \
+              --kubeconfig=$KUBECONFIG
+
+            kubectl config use-context jenkins@mycluster --kubeconfig=$KUBECONFIG
+          '''
         }
       }
     }
