@@ -1,41 +1,39 @@
 pipeline {
     agent any
+
     environment {
-        // Percorso temporaneo del kubeconfig nel workspace
-        KUBECONFIG_PATH = "${WORKSPACE}/kubeconfig"
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub')  // Jenkins Credential ID
+        KUBE_TOKEN = credentials('kube-token')           // Jenkins Credential ID del Service Account K8s
+        KUBE_SERVER = 'https://192.168.56.20:6443'      // Indirizzo API server K8s
+        NAMESPACE = 'formazione-sou'
+        CHART_PATH = 'charts/flask-app'
     }
+
     stages {
-        stage('Setup Kubeconfig') {
+
+        stage('Checkout') {
             steps {
-                withCredentials([
-                    string(credentialsId: 'kube-token', variable: 'KUBE_TOKEN'),
-                    string(credentialsId: 'kube-ca-base64', variable: 'KUBE_CA_BASE64'),
-                    string(credentialsId: 'kube-server', variable: 'KUBE_SERVER')
-                ]) {
-                    script {
-                        sh """
-                        mkdir -p \$(dirname ${KUBECONFIG_PATH})
-                        cat > ${KUBECONFIG_PATH} <<EOF
-apiVersion: v1
-kind: Config
-clusters:
-- cluster:
-    certificate-authority-data: ${KUBE_CA_BASE64}
-    server: ${KUBE_SERVER}
-  name: k8s-cluster
-contexts:
-- context:
-    cluster: k8s-cluster
-    user: jenkins
-  name: jenkins-context
-current-context: jenkins-context
-users:
-- name: jenkins
-  user:
-    token: ${KUBE_TOKEN}
-EOF
-                        """
+                git branch: 'main', url: 'https://github.com/gabri-souce/formazione_sou_k8s.git'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    def tag = 'latest'
+                    if(env.GIT_TAG_NAME) {
+                        tag = env.GIT_TAG_NAME
+                    } else if(env.BRANCH_NAME == 'develop') {
+                        tag = "develop-${env.GIT_COMMIT.substring(0,7)}"
                     }
+
+                    echo "Building Docker image with tag: ${tag}"
+
+                    sh '''
+                        docker build -t ${DOCKERHUB_CREDENTIALS_USR}/flask-app:${tag} .
+                        echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin
+                        docker push ${DOCKERHUB_CREDENTIALS_USR}/flask-app:${tag}
+                    '''
                 }
             }
         }
@@ -44,8 +42,8 @@ EOF
             steps {
                 script {
                     sh """
-                    kubectl --kubeconfig=${KUBECONFIG_PATH} get namespace formazione-sou --ignore-not-found || \
-                    kubectl --kubeconfig=${KUBECONFIG_PATH} create namespace formazione-sou
+                        kubectl --token=${KUBE_TOKEN} --server=${KUBE_SERVER} get namespace ${NAMESPACE} --ignore-not-found || \
+                        kubectl --token=${KUBE_TOKEN} --server=${KUBE_SERVER} create namespace ${NAMESPACE}
                     """
                 }
             }
@@ -55,12 +53,13 @@ EOF
             steps {
                 script {
                     sh """
-                    helm upgrade --install formazione-sou-release charts/hello-node \
-                        --namespace formazione-sou \
-                        --kubeconfig ${KUBECONFIG_PATH} \
-                        --create-namespace \
-                        --set image.repository=gabrisource/step4 \
-                        --set image.tag=latest
+                        helm upgrade --install flask-app ${CHART_PATH} \
+                            --namespace ${NAMESPACE} \
+                            --set image.repository=${DOCKERHUB_CREDENTIALS_USR}/flask-app \
+                            --set image.tag=${env.GIT_TAG_NAME ?: (env.BRANCH_NAME == 'develop' ? "develop-${env.GIT_COMMIT.substring(0,7)}" : "latest")} \
+                            --kube-token=${KUBE_TOKEN} \
+                            --kube-apiserver=${KUBE_SERVER} \
+                            --insecure-skip-tls-verify
                     """
                 }
             }
@@ -68,17 +67,14 @@ EOF
     }
 
     post {
-        always {
-            // Pulizia del kubeconfig temporaneo
-            sh "rm -f ${KUBECONFIG_PATH}"
-        }
         success {
-            echo "Deploy completato con successo!"
+            echo 'Deploy completato con successo!'
         }
         failure {
-            echo "Deploy fallito. Controlla i log."
+            echo 'Deploy fallito. Controlla i log.'
         }
     }
 }
+
 
 
