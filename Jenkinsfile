@@ -12,9 +12,13 @@ pipeline {
                     string(credentialsId: 'kube-server', variable: 'KUBE_SERVER')
                 ]) {
                     script {
-                        def kubeDir = "${KUBECONFIG_PATH}".replaceAll("/[^/]+$", "")
+                        // Calcolo la cartella del kubeconfig
+                        def kubeDir = env.KUBECONFIG_PATH.replaceAll('/[^/]+$', '')
                         sh "mkdir -p ${kubeDir}"
-                        sh """cat > ${KUBECONFIG_PATH} <<EOF
+
+                        // Scrivo il kubeconfig
+                        sh """
+                        cat > ${KUBECONFIG_PATH} <<EOF
 apiVersion: v1
 kind: Config
 clusters:
@@ -32,7 +36,8 @@ users:
 - name: jenkins
   user:
     token: ${KUBE_TOKEN}
-EOF"""
+EOF
+                        """
                     }
                 }
             }
@@ -41,10 +46,7 @@ EOF"""
         stage('Ensure Namespace') {
             steps {
                 script {
-                    sh """
-                    kubectl --kubeconfig=${KUBECONFIG_PATH} get namespace formazione-sou --ignore-not-found || \
-                    kubectl --kubeconfig=${KUBECONFIG_PATH} create namespace formazione-sou
-                    """
+                    sh "kubectl --kubeconfig=${KUBECONFIG_PATH} get namespace formazione-sou --ignore-not-found || kubectl --kubeconfig=${KUBECONFIG_PATH} create namespace formazione-sou"
                 }
             }
         }
