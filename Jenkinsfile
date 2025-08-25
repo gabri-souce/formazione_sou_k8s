@@ -1,123 +1,75 @@
+
 pipeline {
-  agent any
+    agent any
 
-  environment {
-    registry = 'gabrisource/step4'         // Docker Hub repository
-    registryCredential = 'docker'          // Jenkins credentials ID
-    dockerTag = ''
-    KUBECONFIG = "${env.WORKSPACE}/kubeconfig"  // Percorso kubeconfig generato dinamicamente
-    NAMESPACE = 'formazione-sou'          // Namespace Kubernetes
-    RELEASE_NAME = 'formazione-sou-release'   // Nome release Helm
-    CHART_PATH = 'charts/hello-node'      // Path della chart Helm nel repo
-  }
-
-  stages {
-
-    stage('Clone Git') {
-      steps {
-        git branch: 'main', url: 'https://github.com/gabri-souce/formazione_sou_k8s.git'
-      }
+    environment {
+        KUBECONFIG = "${WORKSPACE}/kubeconfig"
     }
 
-    stage('Set Docker Tag') {
-      steps {
-        script {
-          def gitBranch = sh(script: "git rev-parse --abbrev-ref HEAD", returnStdout: true).trim()
-          def gitTag = sh(script: "git describe --tags --exact-match || echo ''", returnStdout: true).trim()
-          def gitCommit = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
+    stages {
+        stage('Setup Kubeconfig') {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'kube-token', variable: 'KUBE_TOKEN'),
+                    string(credentialsId: 'kube-ca', variable: 'KUBE_CA_BASE64'),
+                    string(credentialsId: 'kube-server', variable: 'KUBE_SERVER')
+                ]) {
+                    sh """
+                        # Decodifica il certificato CA in un file temporaneo
+                        echo "$KUBE_CA_BASE64" | base64 -d > /tmp/ca.crt
 
-          if (gitTag) {
-            dockerTag = gitTag
-          } else if (gitBranch == 'main') {
-            dockerTag = 'latest'
-          } else {
-            def sanitizedBranch = gitBranch.replaceAll(/[\\/]/, '-')
-            dockerTag = "${sanitizedBranch}-${gitCommit}"
-          }
+                        # Configura cluster
+                        kubectl config set-cluster mycluster \
+                          --server=$KUBE_SERVER \
+                          --certificate-authority=/tmp/ca.crt \
+                          --embed-certs=true \
+                          --kubeconfig=$KUBECONFIG
 
-          echo "Docker tag will be: ${dockerTag}"
-          env.DOCKER_TAG = dockerTag
+                        # Configura user con token
+                        kubectl config set-credentials jenkins \
+                          --token=$KUBE_TOKEN \
+                          --kubeconfig=$KUBECONFIG
+
+                        # Configura context con namespace
+                        kubectl config set-context jenkins@mycluster \
+                          --cluster=mycluster \
+                          --user=jenkins \
+                          --namespace=formazione-sou \
+                          --kubeconfig=$KUBECONFIG
+
+                        kubectl config use-context jenkins@mycluster --kubeconfig=$KUBECONFIG
+                    """
+                }
+            }
         }
-      }
-    }
 
-    stage('Build Docker Image') {
-      steps {
-        script {
-          dockerImage = docker.build("${registry}:${env.DOCKER_TAG}", "-f progettostep2/Dockerfile progettostep2")
+        stage('Ensure Namespace') {
+            steps {
+                sh """
+                    if ! kubectl --kubeconfig=$KUBECONFIG get namespace formazione-sou > /dev/null 2>&1; then
+                        echo "Namespace formazione-sou non esiste. Lo creo."
+                        kubectl --kubeconfig=$KUBECONFIG create namespace formazione-sou
+                    else
+                        echo "Namespace formazione-sou già esistente."
+                    fi
+                """
+            }
         }
-      }
-    }
 
-    stage('Push Docker Image') {
-      steps {
-        script {
-          docker.withRegistry('https://registry.hub.docker.com', registryCredential) {
-            dockerImage.push()
-          }
+        stage('Helm Install/Upgrade') {
+            steps {
+                sh """
+                    helm upgrade --install formazione-sou-release ./chart \
+                      --namespace formazione-sou \
+                      --kubeconfig $KUBECONFIG
+                """
+            }
         }
-      }
     }
 
-    stage('Setup Kubeconfig') {
-      steps {
-        withCredentials([
-          string(credentialsId: 'kube-token', variable: 'KUBE_TOKEN'),
-          string(credentialsId: 'kube-ca', variable: 'KUBE_CA_CONTENT'),
-          string(credentialsId: 'kube-server', variable: 'KUBE_SERVER')
-        ]) {
-          sh """
-            # Scrive il contenuto del Secret text su un file temporaneo
-            echo "$KUBE_CA_CONTENT" > /tmp/ca.crt
-
-            kubectl config set-cluster mycluster \
-              --server=$KUBE_SERVER \
-              --certificate-authority=/tmp/ca.crt \
-              --embed-certs=true \
-              --kubeconfig=$KUBECONFIG
-
-            kubectl config set-credentials jenkins \
-              --token=$KUBE_TOKEN \
-              --kubeconfig=$KUBECONFIG
-
-            kubectl config set-context jenkins@mycluster \
-              --cluster=mycluster \
-              --user=jenkins \
-              --namespace=${NAMESPACE} \
-              --kubeconfig=$KUBECONFIG
-
-            kubectl config use-context jenkins@mycluster --kubeconfig=$KUBECONFIG
-          """
+    post {
+        always {
+            sh 'rm -f /tmp/ca.crt'
         }
-      }
     }
-
-    stage('Ensure Namespace') {
-      steps {
-        script {
-          def exists = sh(script: "kubectl --kubeconfig=${KUBECONFIG} get namespace ${NAMESPACE} --ignore-not-found", returnStatus: true) == 0
-          if (!exists) {
-            echo "Namespace ${NAMESPACE} non esiste. Lo creo."
-            sh "kubectl --kubeconfig=${KUBECONFIG} create namespace ${NAMESPACE}"
-          } else {
-            echo "Namespace ${NAMESPACE} già esistente."
-          }
-        }
-      }
-    }
-
-    stage('Helm Install/Upgrade') {
-      steps {
-        script {
-          sh """
-          helm upgrade --install ${RELEASE_NAME} ${CHART_PATH} \
-            --namespace ${NAMESPACE} --kubeconfig ${KUBECONFIG} --create-namespace \
-            --set image.repository=${registry} \
-            --set image.tag=${DOCKER_TAG}
-          """
-        }
-      }
-    }
-
-  }
 }
