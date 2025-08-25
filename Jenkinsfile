@@ -4,7 +4,7 @@ pipeline {
     environment {
         DOCKERHUB_CREDENTIALS = 'docker'       // ID credenziali Docker in Jenkins
         K8S_TOKEN = credentials('kube-token')   // ID credenziali token Kubernetes in Jenkins
-        K8S_API_SERVER = 'https://192.168.3.17' // Inserisci l'API server del tuo cluster
+        K8S_API_SERVER = 'https://192.168.3.17:6443' // Inserisci l'API server del tuo cluster
         NAMESPACE = 'formazione-sou'
         RELEASE_NAME = 'flask-app-release'
         CHART_PATH = 'progettostep2/chart'     // Path relativo del chart Helm
