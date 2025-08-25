@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         DOCKERHUB_CREDENTIALS = 'docker'       // ID credenziali Docker in Jenkins
-        K8S_TOKEN = credentials('k8s-token')   // ID credenziali token Kubernetes in Jenkins
+        K8S_TOKEN = credentials('kube-token')   // ID credenziali token Kubernetes in Jenkins
         K8S_API_SERVER = 'https://<CLUSTER_API>' // Inserisci l'API server del tuo cluster
         NAMESPACE = 'formazione-sou'
         RELEASE_NAME = 'flask-app-release'
