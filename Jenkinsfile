@@ -5,7 +5,7 @@ pipeline {
         NAMESPACE = "formazione-sou"
         RELEASE_NAME = "flask-app-release"
         CHART_PATH = "progettostep2/helm-chart"
-        KUBECONFIG = "/var/jenkins_home/workspace/step4/kubeconfig"
+        KUBECONFIG = "/home/jenkins/.kube/config"
         registry = "gabrisource/gabrielestep2"
         registryCredential = "docker"
     }
