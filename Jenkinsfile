@@ -1,6 +1,7 @@
 pipeline {
     agent any
     environment {
+        // Percorso temporaneo del kubeconfig nel workspace
         KUBECONFIG_PATH = "${WORKSPACE}/kubeconfig"
     }
     stages {
@@ -12,9 +13,8 @@ pipeline {
                     string(credentialsId: 'kube-server', variable: 'KUBE_SERVER')
                 ]) {
                     script {
-                        // Creazione del kubeconfig completo
                         sh """
-                        mkdir -p ${KUBECONFIG_PATH%/*}
+                        mkdir -p \$(dirname ${KUBECONFIG_PATH})
                         cat > ${KUBECONFIG_PATH} <<EOF
 apiVersion: v1
 kind: Config
@@ -27,7 +27,6 @@ contexts:
 - context:
     cluster: k8s-cluster
     user: jenkins
-    namespace: formazione-sou
   name: jenkins-context
 current-context: jenkins-context
 users:
@@ -70,6 +69,7 @@ EOF
 
     post {
         always {
+            // Pulizia del kubeconfig temporaneo
             sh "rm -f ${KUBECONFIG_PATH}"
         }
         success {
