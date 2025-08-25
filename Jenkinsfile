@@ -1,48 +1,9 @@
 pipeline {
     agent any
     environment {
-        KUBECONFIG_PATH = "${WORKSPACE}/kubeconfig"
+        KUBECONFIG_PATH = "/home/jenkins/.kube/config"
     }
     stages {
-        stage('Setup Kubeconfig') {
-            steps {
-                withCredentials([
-                    string(credentialsId: 'kube-token', variable: 'KUBE_TOKEN'),
-                    string(credentialsId: 'kube-ca-base64', variable: 'KUBE_CA_BASE64'),
-                    string(credentialsId: 'kube-server', variable: 'KUBE_SERVER')
-                ]) {
-                    script {
-                        // Calcolo la cartella del kubeconfig
-                        def kubeDir = env.KUBECONFIG_PATH.replaceAll('/[^/]+$', '')
-                        sh "mkdir -p ${kubeDir}"
-
-                        // Scrivo il kubeconfig
-                        sh """
-                        cat > ${KUBECONFIG_PATH} <<EOF
-apiVersion: v1
-kind: Config
-clusters:
-- cluster:
-    certificate-authority-data: ${KUBE_CA_BASE64}
-    server: ${KUBE_SERVER}
-  name: k8s-cluster
-contexts:
-- context:
-    cluster: k8s-cluster
-    user: jenkins
-  name: jenkins-context
-current-context: jenkins-context
-users:
-- name: jenkins
-  user:
-    token: ${KUBE_TOKEN}
-EOF
-                        """
-                    }
-                }
-            }
-        }
-
         stage('Ensure Namespace') {
             steps {
                 script {
@@ -68,9 +29,6 @@ EOF
     }
 
     post {
-        always {
-            sh "rm -f ${KUBECONFIG_PATH}"
-        }
         success {
             echo "Deploy completato con successo!"
         }
@@ -79,3 +37,4 @@ EOF
         }
     }
 }
+
