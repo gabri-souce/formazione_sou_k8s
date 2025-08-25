@@ -5,10 +5,10 @@ pipeline {
     registry = 'gabrisource/step4'          // Docker Hub repository
     registryCredential = 'docker'           // Jenkins credentials ID
     dockerTag = ''
-    KUBECONFIG = '/var/jenkins_home/workspace/step4/kubeconfig' // Percorso kubeconfig nel container Jenkins
+    KUBECONFIG = "${WORKSPACE}/kubeconfig" // Percorso temporaneo kubeconfig
     NAMESPACE = 'formazione-sou'           // Namespace Kubernetes
     RELEASE_NAME = 'formazione-sou-release'// Nome release Helm
-    CHART_PATH = 'charts/hello-node'       // Path corretto della chart Helm
+    CHART_PATH = 'charts/hello-node'       // Path della chart Helm nel repo
   }
 
   stages {
@@ -61,9 +61,33 @@ pipeline {
     stage('Setup Kubeconfig') {
       steps {
         withCredentials([
-          file(credentialsId: 'kube-config', variable: 'KUBECONFIG_FILE')
+          string(credentialsId: 'kube-token', variable: 'KUBE_TOKEN'),
+          string(credentialsId: 'kube-ca-base64', variable: 'KUBE_CA_BASE64'),
+          string(credentialsId: 'kube-server', variable: 'KUBE_SERVER')
         ]) {
-          sh "cp $KUBECONFIG_FILE ${KUBECONFIG}"
+          sh '''
+          mkdir -p $(dirname ${KUBECONFIG})
+          cat <<EOF > ${KUBECONFIG}
+apiVersion: v1
+kind: Config
+clusters:
+- name: mycluster
+  cluster:
+    server: ${KUBE_SERVER}
+    certificate-authority-data: ${KUBE_CA_BASE64}
+contexts:
+- name: jenkins@mycluster
+  context:
+    cluster: mycluster
+    user: jenkins
+    namespace: ${NAMESPACE}
+current-context: jenkins@mycluster
+users:
+- name: jenkins
+  user:
+    token: ${KUBE_TOKEN}
+EOF
+          '''
         }
       }
     }
@@ -93,6 +117,12 @@ pipeline {
           """
         }
       }
+    }
+  }
+
+  post {
+    always {
+      sh "rm -f ${KUBECONFIG}"
     }
   }
 }
