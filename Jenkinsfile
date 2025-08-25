@@ -5,7 +5,7 @@ pipeline {
     registry = 'gabrisource/step4'         // Docker Hub repository
     registryCredential = 'docker'          // Jenkins credentials ID
     dockerTag = ''
-    KUBECONFIG = '/home/jenkins/.kube/config'  // Percorso kubeconfig nel container Jenkins
+    KUBECONFIG = "${env.WORKSPACE}/kubeconfig"  // Percorso kubeconfig generato dinamicamente
     NAMESPACE = 'formazione-sou'          // Namespace Kubernetes
     RELEASE_NAME = 'formazione-sou-release'   // Nome release Helm
     CHART_PATH = 'charts/hello-node'      // Path della chart Helm nel repo
@@ -63,13 +63,16 @@ pipeline {
       steps {
         withCredentials([
           string(credentialsId: 'kube-token', variable: 'KUBE_TOKEN'),
-          file(credentialsId: 'kube-ca', variable: 'KUBE_CA_FILE'),
+          string(credentialsId: 'kube-ca', variable: 'KUBE_CA_CONTENT'),
           string(credentialsId: 'kube-server', variable: 'KUBE_SERVER')
         ]) {
           sh """
+            # Scrive il contenuto del Secret text su un file temporaneo
+            echo "$KUBE_CA_CONTENT" > /tmp/ca.crt
+
             kubectl config set-cluster mycluster \
               --server=$KUBE_SERVER \
-              --certificate-authority=$KUBE_CA_FILE \
+              --certificate-authority=/tmp/ca.crt \
               --embed-certs=true \
               --kubeconfig=$KUBECONFIG
 
