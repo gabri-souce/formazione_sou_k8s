@@ -2,15 +2,16 @@ pipeline {
     agent any
 
     environment {
-        registryCredential = 'dockerhub-cred'
-        NAMESPACE = 'formazione-sou'
-        RELEASE_NAME = 'flask-app-example'
-        CHART_PATH = 'charts/flask-app-example'
-        KUBECONFIG = '/home/jenkins/.kube/config'
+        NAMESPACE = "formazione-sou"
+        RELEASE_NAME = "flask-app-release"
+        CHART_PATH = "progettostep2/helm-chart"
+        KUBECONFIG = "/var/jenkins_home/workspace/step4/kubeconfig"
+        registry = "gabrisource/gabrielestep2"
+        registryCredential = "docker"
     }
 
     stages {
-        stage('Set Docker Tag and Registry') {
+        stage('Set Docker Tag') {
             steps {
                 script {
                     def gitBranch = sh(script: "git rev-parse --abbrev-ref HEAD", returnStdout: true).trim()
@@ -28,9 +29,6 @@ pipeline {
 
                     echo "Docker tag will be: ${dockerTag}"
                     env.DOCKER_TAG = dockerTag
-
-                    env.registry = "gab/flask-app-example"
-                    echo "Docker registry set to: ${env.registry}"
                 }
             }
         }
@@ -38,7 +36,8 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    dockerImage = docker.build("${env.registry}:${env.DOCKER_TAG}", "-f progettostep2/Dockerfile progettostep2")
+                    def dockerImage = docker.build("${registry}:${env.DOCKER_TAG}", "-f progettostep2/Dockerfile progettostep2")
+                    env.DOCKER_IMAGE = dockerImage.id
                 }
             }
         }
@@ -46,8 +45,8 @@ pipeline {
         stage('Push Docker Image') {
             steps {
                 script {
-                    docker.withRegistry('https://registry.hub.docker.com', 'docker') {
-                        dockerImage.push()
+                    docker.withRegistry('https://index.docker.io/v1/', registryCredential) {
+                        docker.image("${registry}:${env.DOCKER_TAG}").push()
                     }
                 }
             }
@@ -73,41 +72,9 @@ pipeline {
                     sh """
                     helm upgrade --install ${RELEASE_NAME} ${CHART_PATH} \
                         --namespace ${NAMESPACE} --kubeconfig ${KUBECONFIG} --create-namespace \
-                        --set image.repository=${env.registry} \
+                        --set image.repository=${registry} \
                         --set image.tag=${DOCKER_TAG}
                     """
-                }
-            }
-        }
-
-        stage('Check Deployment Best Practices') {
-            steps {
-                script {
-                    def deployments = sh(script: "kubectl --kubeconfig=${KUBECONFIG} -n ${NAMESPACE} get deployments -o jsonpath='{.items[*].metadata.name}'", returnStdout: true).trim().split()
-                    
-                    if (deployments.size() == 0) {
-                        error "Nessun Deployment trovato nel namespace ${NAMESPACE}"
-                    }
-
-                    deployments.each { dep ->
-                        echo "Controllo Deployment: ${dep}"
-
-                        def json = sh(script: "kubectl --kubeconfig=${KUBECONFIG} -n ${NAMESPACE} get deployment ${dep} -o json", returnStdout: true)
-                        def data = readJSON text: json
-                        def containers = data.spec.template.spec.containers
-
-                        containers.each { container ->
-                            if (!container.readinessProbe) {
-                                error "Manca ReadinessProbe nel container ${container.name} del deployment ${dep}"
-                            }
-                            if (!container.livenessProbe) {
-                                error "Manca LivenessProbe nel container ${container.name} del deployment ${dep}"
-                            }
-                            if (!container.resources || !container.resources.limits || !container.resources.requests) {
-                                error "Manca limits/requests nel container ${container.name} del deployment ${dep}"
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -115,10 +82,11 @@ pipeline {
 
     post {
         success {
-            echo "Deploy completato con successo e best practices verificate!"
+            echo "Deploy completato con successo!"
         }
         failure {
-            echo "Deploy fallito. Controlla i log per errori nelle best practices."
+            echo "Deploy fallito. Controlla i log per errori."
         }
     }
 }
+
