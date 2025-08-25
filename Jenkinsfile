@@ -2,32 +2,25 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_REPO = "gabrisource/flask-app-example"
+        K8S_SERVER = "https://192.168.3.17:6443"
         K8S_NAMESPACE = "formazione-sou"
     }
 
     stages {
-        stage('Checkout') {
-            steps {
-                git branch: 'main', url: 'https://github.com/gabri-souce/formazione_sou_k8s.git'
-            }
-        }
-
         stage('Build Docker Image') {
             steps {
                 script {
-                    // Costruisci l'immagine Docker dalla cartella progettostep2
-                    def imageTag = "${DOCKER_REPO}:${GIT_COMMIT}"
-                    dockerImage = docker.build(imageTag, "progettostep2")
+                    def commit = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
+                    def dockerImage = docker.build("gabrisource/flask-app-example:${commit}", "./progettostep2")
                 }
             }
         }
 
         stage('Push Docker Image') {
             steps {
-                withDockerRegistry([credentialsId: 'docker', url: 'https://index.docker.io/v1/']) {
+                withDockerRegistry(credentialsId: 'dockerhub-cred', toolName: 'docker') {
                     script {
-                        dockerImage.push()
+                        sh "docker push gabrisource/flask-app-example:$(git rev-parse HEAD)"
                     }
                 }
             }
@@ -38,14 +31,14 @@ pipeline {
                 withCredentials([string(credentialsId: 'kube-token', variable: 'K8S_TOKEN')]) {
                     script {
                         sh """
-                        kubectl --server=https://192.168.3.17:6443 \
-                                --token=$K8S_TOKEN \
-                                --insecure-skip-tls-verify \
-                                get namespace ${K8S_NAMESPACE} || \
-                        kubectl --server=https://192.168.3.17:6443 \
-                                --token=$K8S_TOKEN \
-                                --insecure-skip-tls-verify \
-                                create namespace ${K8S_NAMESPACE}
+                        kubectl --server=$K8S_SERVER \
+                            --token=$K8S_TOKEN \
+                            --insecure-skip-tls-verify \
+                            get namespace $K8S_NAMESPACE || \
+                        kubectl --server=$K8S_SERVER \
+                            --token=$K8S_TOKEN \
+                            --insecure-skip-tls-verify \
+                            create namespace $K8S_NAMESPACE
                         """
                     }
                 }
@@ -57,13 +50,12 @@ pipeline {
                 withCredentials([string(credentialsId: 'kube-token', variable: 'K8S_TOKEN')]) {
                     script {
                         sh """
-                        helm upgrade --install flask-app-progetto \
-                            progettostep2/helm-chart \
-                            --namespace ${K8S_NAMESPACE} \
-                            --set image.repository=${DOCKER_REPO} \
-                            --set image.tag=${GIT_COMMIT} \
-                            --kube-token $K8S_TOKEN \
-                            --kube-apiserver https://192.168.3.17:6443 \
+                        helm upgrade --install flask-app ./helm-chart \
+                            --namespace $K8S_NAMESPACE \
+                            --set image.repository=gabrisource/flask-app-example \
+                            --set image.tag=$(git rev-parse HEAD) \
+                            --kube-token=$K8S_TOKEN \
+                            --kube-apiserver=$K8S_SERVER \
                             --kube-insecure-skip-tls-verify
                         """
                     }
@@ -73,13 +65,11 @@ pipeline {
     }
 
     post {
-        success {
-            echo "Deploy completato con successo!"
-        }
         failure {
             echo "Deploy fallito. Controlla i log."
         }
     }
 }
+
 
 
