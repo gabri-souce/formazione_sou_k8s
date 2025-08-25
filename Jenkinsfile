@@ -2,38 +2,53 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub')  // Jenkins Credential ID
-        KUBE_TOKEN = credentials('kube-token')           // Jenkins Credential ID del Service Account K8s
-        KUBE_SERVER = 'https://192.168.56.20:6443'      // Indirizzo API server K8s
+        registryCredential = 'dockerhub-cred'
         NAMESPACE = 'formazione-sou'
-        CHART_PATH = 'charts/flask-app'
+        RELEASE_NAME = 'flask-app-example'
+        CHART_PATH = 'charts/flask-app-example'
+        KUBECONFIG = '/home/jenkins/.kube/config'
     }
 
     stages {
-
-        stage('Checkout') {
+        stage('Set Docker Tag and Registry') {
             steps {
-                git branch: 'main', url: 'https://github.com/gabri-souce/formazione_sou_k8s.git'
+                script {
+                    def gitBranch = sh(script: "git rev-parse --abbrev-ref HEAD", returnStdout: true).trim()
+                    def gitTag = sh(script: "git describe --tags --exact-match || echo ''", returnStdout: true).trim()
+                    def gitCommit = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
+
+                    if (gitTag) {
+                        dockerTag = gitTag
+                    } else if (gitBranch == 'main') {
+                        dockerTag = 'latest'
+                    } else {
+                        def sanitizedBranch = gitBranch.replaceAll(/[\\/]/, '-')
+                        dockerTag = "${sanitizedBranch}-${gitCommit}"
+                    }
+
+                    echo "Docker tag will be: ${dockerTag}"
+                    env.DOCKER_TAG = dockerTag
+
+                    env.registry = "gab/flask-app-example"
+                    echo "Docker registry set to: ${env.registry}"
+                }
             }
         }
 
         stage('Build Docker Image') {
             steps {
                 script {
-                    def tag = 'latest'
-                    if(env.GIT_TAG_NAME) {
-                        tag = env.GIT_TAG_NAME
-                    } else if(env.BRANCH_NAME == 'develop') {
-                        tag = "develop-${env.GIT_COMMIT.substring(0,7)}"
+                    dockerImage = docker.build("${env.registry}:${env.DOCKER_TAG}", "-f progettostep2/Dockerfile progettostep2")
+                }
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                script {
+                    docker.withRegistry('https://registry.hub.docker.com', registryCredential) {
+                        dockerImage.push()
                     }
-
-                    echo "Building Docker image with tag: ${tag}"
-
-                    sh '''
-                        docker build -t ${DOCKERHUB_CREDENTIALS_USR}/flask-app:${tag} .
-                        echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin
-                        docker push ${DOCKERHUB_CREDENTIALS_USR}/flask-app:${tag}
-                    '''
                 }
             }
         }
@@ -41,10 +56,13 @@ pipeline {
         stage('Ensure Namespace') {
             steps {
                 script {
-                    sh """
-                        kubectl --token=${KUBE_TOKEN} --server=${KUBE_SERVER} get namespace ${NAMESPACE} --ignore-not-found || \
-                        kubectl --token=${KUBE_TOKEN} --server=${KUBE_SERVER} create namespace ${NAMESPACE}
-                    """
+                    def exists = sh(script: "kubectl --kubeconfig=${KUBECONFIG} get namespace ${NAMESPACE} --ignore-not-found", returnStatus: true) == 0
+                    if (!exists) {
+                        echo "Namespace ${NAMESPACE} non esiste. Lo creo."
+                        sh "kubectl --kubeconfig=${KUBECONFIG} create namespace ${NAMESPACE}"
+                    } else {
+                        echo "Namespace ${NAMESPACE} già esistente."
+                    }
                 }
             }
         }
@@ -53,14 +71,43 @@ pipeline {
             steps {
                 script {
                     sh """
-                        helm upgrade --install flask-app ${CHART_PATH} \
-                            --namespace ${NAMESPACE} \
-                            --set image.repository=${DOCKERHUB_CREDENTIALS_USR}/flask-app \
-                            --set image.tag=${env.GIT_TAG_NAME ?: (env.BRANCH_NAME == 'develop' ? "develop-${env.GIT_COMMIT.substring(0,7)}" : "latest")} \
-                            --kube-token=${KUBE_TOKEN} \
-                            --kube-apiserver=${KUBE_SERVER} \
-                            --insecure-skip-tls-verify
+                    helm upgrade --install ${RELEASE_NAME} ${CHART_PATH} \
+                        --namespace ${NAMESPACE} --kubeconfig ${KUBECONFIG} --create-namespace \
+                        --set image.repository=${env.registry} \
+                        --set image.tag=${DOCKER_TAG}
                     """
+                }
+            }
+        }
+
+        stage('Check Deployment Best Practices') {
+            steps {
+                script {
+                    def deployments = sh(script: "kubectl --kubeconfig=${KUBECONFIG} -n ${NAMESPACE} get deployments -o jsonpath='{.items[*].metadata.name}'", returnStdout: true).trim().split()
+                    
+                    if (deployments.size() == 0) {
+                        error "Nessun Deployment trovato nel namespace ${NAMESPACE}"
+                    }
+
+                    deployments.each { dep ->
+                        echo "Controllo Deployment: ${dep}"
+
+                        def json = sh(script: "kubectl --kubeconfig=${KUBECONFIG} -n ${NAMESPACE} get deployment ${dep} -o json", returnStdout: true)
+                        def data = readJSON text: json
+                        def containers = data.spec.template.spec.containers
+
+                        containers.each { container ->
+                            if (!container.readinessProbe) {
+                                error "Manca ReadinessProbe nel container ${container.name} del deployment ${dep}"
+                            }
+                            if (!container.livenessProbe) {
+                                error "Manca LivenessProbe nel container ${container.name} del deployment ${dep}"
+                            }
+                            if (!container.resources || !container.resources.limits || !container.resources.requests) {
+                                error "Manca limits/requests nel container ${container.name} del deployment ${dep}"
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -68,13 +115,10 @@ pipeline {
 
     post {
         success {
-            echo 'Deploy completato con successo!'
+            echo "Deploy completato con successo e best practices verificate!"
         }
         failure {
-            echo 'Deploy fallito. Controlla i log.'
+            echo "Deploy fallito. Controlla i log per errori nelle best practices."
         }
     }
 }
-
-
-
