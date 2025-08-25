@@ -2,79 +2,81 @@ pipeline {
     agent any
 
     environment {
-        KUBE_CONFIG = '/var/jenkins_home/workspace/step4/kubeconfig'
-        HELM_RELEASE = 'formazione-sou-release'
-        HELM_CHART = 'charts/hello-node'
-        NAMESPACE = 'formazione-sou'
-        IMAGE_REPO = 'gabrisource/step4'
-        IMAGE_TAG = 'latest'
+        KUBECONFIG_PATH = "${WORKSPACE}/kubeconfig"
+        KUBE_TOKEN = credentials('kube-token')       // ID della credenziale token in Jenkins
+        KUBE_SERVER = credentials('kube-server')     // URL API server Kubernetes
+        KUBE_CA_BASE64 = credentials('kube-ca-base64') // Certificato CA base64
     }
 
     stages {
-
-        stage('Checkout') {
-            steps {
-                git branch: 'main', url: 'https://github.com/gabri-souce/formazione_sou_k8s.git'
-            }
-        }
-
         stage('Setup Kubeconfig') {
             steps {
-                withCredentials([
-                    string(credentialsId: 'kube-ca-base64', variable: 'KUBE_CA_BASE64'),
-                    string(credentialsId: 'kube-token', variable: 'KUBE_TOKEN'),
-                    string(credentialsId: 'kube-server', variable: 'KUBE_SERVER')
-                ]) {
-                    sh '''
-                        mkdir -p $(dirname ${KUBE_CONFIG})
-                        cat <<EOF > ${KUBE_CONFIG}
+                script {
+                    // Scrive il kubeconfig nel workspace
+                    sh """
+                    mkdir -p ${WORKSPACE}
+                    cat > ${KUBECONFIG_PATH} <<EOF
 apiVersion: v1
 kind: Config
 clusters:
-- cluster:
-    certificate-authority-data: ${KUBE_CA_BASE64}
+- name: cluster
+  cluster:
     server: ${KUBE_SERVER}
-  name: mycluster
+    certificate-authority-data: ${KUBE_CA_BASE64}
 contexts:
-- context:
-    cluster: mycluster
-    namespace: ${NAMESPACE}
+- name: jenkins-context
+  context:
+    cluster: cluster
     user: jenkins
-  name: jenkins@mycluster
-current-context: jenkins@mycluster
+    namespace: default
+current-context: jenkins-context
 users:
 - name: jenkins
   user:
     token: ${KUBE_TOKEN}
 EOF
-                    '''
+                    """
+                }
+            }
+        }
+
+        stage('Ensure Namespace') {
+            steps {
+                script {
+                    sh """
+                    kubectl --kubeconfig=${KUBECONFIG_PATH} get namespace formazione-sou || \
+                    kubectl --kubeconfig=${KUBECONFIG_PATH} create namespace formazione-sou
+                    """
                 }
             }
         }
 
         stage('Helm Install/Upgrade') {
             steps {
-                sh """
-                    helm upgrade --install ${HELM_RELEASE} ${HELM_CHART} \
-                        --namespace ${NAMESPACE} \
-                        --kubeconfig ${KUBE_CONFIG} \
-                        --set image.repository=${IMAGE_REPO} \
-                        --set image.tag=${IMAGE_TAG}
-                """
+                script {
+                    sh """
+                    helm upgrade --install formazione-sou-release charts/hello-node \
+                        --namespace formazione-sou \
+                        --kubeconfig ${KUBECONFIG_PATH} \
+                        --create-namespace \
+                        --set image.repository=gabrisource/step4 \
+                        --set image.tag=latest
+                    """
+                }
             }
         }
     }
 
     post {
         always {
-            sh "rm -f ${KUBE_CONFIG}"
-        }
-        failure {
-            echo 'Deploy fallito. Controlla i log.'
+            // Pulisce il kubeconfig dal workspace
+            sh "rm -f ${KUBECONFIG_PATH}"
         }
         success {
-            echo 'Deploy completato con successo!'
+            echo "Deploy completato con successo!"
+        }
+        failure {
+            echo "Deploy fallito. Controlla i log."
         }
     }
 }
-
