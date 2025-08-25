@@ -2,12 +2,13 @@ pipeline {
     agent any
 
     environment {
-        registry = "gabrisource/flask-app-example"
-        registryCredential = "docker" // ID delle credenziali Docker in Jenkins
-        NAMESPACE = "formazione-sou"
-        RELEASE_NAME = "flask-app"
-        CHART_PATH = "./progettostep2/chart"
-        KUBECONFIG = "/home/jenkins/.kube/config"
+        DOCKERHUB_CREDENTIALS = 'docker'       // ID credenziali Docker in Jenkins
+        K8S_TOKEN = credentials('k8s-token')   // ID credenziali token Kubernetes in Jenkins
+        K8S_API_SERVER = 'https://<CLUSTER_API>' // Inserisci l'API server del tuo cluster
+        NAMESPACE = 'formazione-sou'
+        RELEASE_NAME = 'flask-app-release'
+        CHART_PATH = 'progettostep2/chart'     // Path relativo del chart Helm
+        REGISTRY = 'gabrisource/flask-app-example' // Docker Hub repo
     }
 
     stages {
@@ -36,8 +37,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    def dockerImage = docker.build("${registry}:${env.DOCKER_TAG}", "-f progettostep2/Dockerfile progettostep2")
-                    env.DOCKER_IMAGE = dockerImage.imageName()
+                    dockerImage = docker.build("${REGISTRY}:${DOCKER_TAG}", "-f progettostep2/Dockerfile progettostep2")
                 }
             }
         }
@@ -45,8 +45,8 @@ pipeline {
         stage('Push Docker Image') {
             steps {
                 script {
-                    docker.withRegistry('https://registry.hub.docker.com', registryCredential) {
-                        docker.image(env.DOCKER_IMAGE).push()
+                    docker.withRegistry('https://registry.hub.docker.com', DOCKERHUB_CREDENTIALS) {
+                        dockerImage.push()
                     }
                 }
             }
@@ -55,10 +55,12 @@ pipeline {
         stage('Ensure Namespace') {
             steps {
                 script {
-                    def exists = sh(script: "kubectl --kubeconfig=${KUBECONFIG} --insecure-skip-tls-verify get namespace ${NAMESPACE} --ignore-not-found", returnStatus: true) == 0
+                    def exists = sh(script: """kubectl --server=${K8S_API_SERVER} \
+                        --token=${K8S_TOKEN} --insecure-skip-tls-verify get namespace ${NAMESPACE} --ignore-not-found""",
+                        returnStatus: true) == 0
                     if (!exists) {
                         echo "Namespace ${NAMESPACE} non esiste. Lo creo."
-                        sh "kubectl --kubeconfig=${KUBECONFIG} --insecure-skip-tls-verify create namespace ${NAMESPACE}"
+                        sh "kubectl --server=${K8S_API_SERVER} --token=${K8S_TOKEN} --insecure-skip-tls-verify create namespace ${NAMESPACE}"
                     } else {
                         echo "Namespace ${NAMESPACE} già esistente."
                     }
@@ -71,9 +73,11 @@ pipeline {
                 script {
                     sh """
                     helm upgrade --install ${RELEASE_NAME} ${CHART_PATH} \
-                        --namespace ${NAMESPACE} --kubeconfig ${KUBECONFIG} --create-namespace \
-                        --set image.repository=${registry} \
+                        --namespace ${NAMESPACE} \
+                        --set image.repository=${REGISTRY} \
                         --set image.tag=${DOCKER_TAG} \
+                        --kube-apiserver=${K8S_API_SERVER} \
+                        --kube-token=${K8S_TOKEN} \
                         --insecure-skip-tls-verify
                     """
                 }
@@ -82,12 +86,10 @@ pipeline {
     }
 
     post {
-        success {
-            echo "Deploy completato con successo!"
-        }
         failure {
             echo "Deploy fallito. Controlla i log."
         }
     }
 }
+
 
