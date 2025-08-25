@@ -2,16 +2,17 @@ pipeline {
   agent any
 
   environment {
-    registry = 'gabrisource/step4'          // Docker Hub repository
-    registryCredential = 'docker'           // Jenkins credentials ID
+    registry = 'gabrisource/step4'         // Docker Hub repository
+    registryCredential = 'docker'          // Jenkins credentials ID
     dockerTag = ''
-    KUBECONFIG = "${env.WORKSPACE}/kubeconfig"  // kubeconfig generato dinamicamente
-    NAMESPACE = 'formazione-sou'           // Namespace Kubernetes
-    RELEASE_NAME = 'formazione-sou-release' // Nome release Helm
-    CHART_PATH = 'charts/hello-node'       // Path della chart Helm nel repo
+    KUBECONFIG = '/home/jenkins/.kube/config'  // Percorso kubeconfig nel container Jenkins
+    NAMESPACE = 'formazione-sou'          // Namespace Kubernetes
+    RELEASE_NAME = 'formazione-sou-release'   // Nome release Helm
+    CHART_PATH = 'charts/hello-node'      // Path della chart Helm nel repo
   }
 
   stages {
+
     stage('Clone Git') {
       steps {
         git branch: 'main', url: 'https://github.com/gabri-souce/formazione_sou_k8s.git'
@@ -62,15 +63,13 @@ pipeline {
       steps {
         withCredentials([
           string(credentialsId: 'kube-token', variable: 'KUBE_TOKEN'),
-          string(credentialsId: 'kube-ca', variable: 'KUBE_CA'),
+          file(credentialsId: 'kube-ca', variable: 'KUBE_CA_FILE'),
           string(credentialsId: 'kube-server', variable: 'KUBE_SERVER')
         ]) {
-          sh '''
-            echo $KUBE_CA | base64 -d > ca.crt
-
+          sh """
             kubectl config set-cluster mycluster \
               --server=$KUBE_SERVER \
-              --certificate-authority=ca.crt \
+              --certificate-authority=$KUBE_CA_FILE \
               --embed-certs=true \
               --kubeconfig=$KUBECONFIG
 
@@ -85,7 +84,7 @@ pipeline {
               --kubeconfig=$KUBECONFIG
 
             kubectl config use-context jenkins@mycluster --kubeconfig=$KUBECONFIG
-          '''
+          """
         }
       }
     }
@@ -116,5 +115,6 @@ pipeline {
         }
       }
     }
+
   }
 }
