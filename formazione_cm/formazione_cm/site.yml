@@ -1,0 +1,12 @@
+- hosts: localhost
+  gather_facts: yes
+  vars_files:
+    - vault/secret.yml
+  vars:
+    image_tag: "{{ image_tag | default('latest') }}"
+  roles:
+    - registry
+    - container_build
+    - container_run
+
+

@@ -1,0 +1,8 @@
+---
+containers:
+  - name: ubuntu_ssh
+    context: "../../containers/ubuntu_ssh"
+    tag: "ubuntu_ssh:latest"
+  - name: alpine_ssh
+    context: "../../containers/alpine_ssh"
+    tag: "alpine_ssh:latest"

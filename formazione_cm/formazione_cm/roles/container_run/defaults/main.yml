@@ -1,0 +1,8 @@
+---
+container_instances:
+  - name: ubuntu_ssh
+    tag: "ubuntu_ssh:latest"
+    port: 2222
+  - name: alpine_ssh
+    tag: "alpine_ssh:latest"
+    port: 2223

@@ -1,0 +1,9 @@
+---
+# Nome e porta del registry
+registry_name: "local_registry"
+registry_port: 5000
+
+# Variabili per il login, da Vault
+registry_user: "{{ registry_user }}"
+registry_password: "{{ registry_password }}"
+

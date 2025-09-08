@@ -1,0 +1,39 @@
+pipeline {
+    agent any
+
+    environment {
+        IMAGE_TAG = "${BUILD_NUMBER}"           // tag dinamico
+        ANSIBLE_PLAYBOOK = "site.yml"
+        VAULT_PASS = "vault/pass.rtf"
+        REGISTRY = "localhost:5000"
+    }
+
+    stages {
+        stage('Build and Run Containers') {
+            steps {
+                script {
+                    sh """
+                    ansible-playbook ${ANSIBLE_PLAYBOOK} \
+                    --extra-vars 'image_tag=${IMAGE_TAG}' \
+                    --vault-password-file ${VAULT_PASS}
+                    """
+                }
+            }
+        }
+
+        stage('Push Images to Registry') {
+            steps {
+                script {
+                    sh """
+                    docker tag ubuntu_ssh:${IMAGE_TAG} ${REGISTRY}/ubuntu_ssh:${IMAGE_TAG}
+                    docker push ${REGISTRY}/ubuntu_ssh:${IMAGE_TAG}
+
+                    docker tag alpine_ssh:${IMAGE_TAG} ${REGISTRY}/alpine_ssh:${IMAGE_TAG}
+                    docker push ${REGISTRY}/alpine_ssh:${IMAGE_TAG}
+                    """
+                }
+            }
+        }
+    }
+}
+

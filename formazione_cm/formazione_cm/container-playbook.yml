@@ -1,0 +1,20 @@
+---
+- name: Configurare Docker Registry su macOS
+  hosts: localhost
+  tasks:
+
+    - name: Assicurarsi che Docker sia in esecuzione
+      ansible.builtin.command: docker info
+      register: docker_status
+      failed_when: docker_status.rc != 0
+      ignore_errors: no
+
+    - name: Eseguire il container del Docker Registry
+      community.docker.docker_container:
+        name: registry
+        image: registry:2
+        state: started
+        restart_policy: always
+        ports:
+          - "5000:5000"
+
